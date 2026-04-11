@@ -24,7 +24,8 @@ jobs:
         with:
           args: >
             -Dsonar.projectKey=E-Commerce-Application-Microservice_authentication-service
-            -Dsonar.organization=e-commerce-application-microservic
+            -Dsonar.organization=e-commerce-application-microservice
+
             -Dsonar.sources=.
 
       - name: Send Email on Quality Gate Failure
