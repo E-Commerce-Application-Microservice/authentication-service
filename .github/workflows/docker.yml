@@ -6,7 +6,7 @@ on:
       - ["main", "M-VIGNESH3-patch-1"]
 
 jobs:
-  docker-security-scan:
+  docker-security-scan: 
     runs-on: ubuntu-latest
 
     steps:
