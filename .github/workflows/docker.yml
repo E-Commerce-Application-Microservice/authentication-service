@@ -1,52 +1,65 @@
-name: Build, Scan Docker Image and Mail Report
+name: Build Docker Image, Scan & Email Vulnerability Report
 
 on:
   push:
-    branches: [ "main" ,"M-VIGNESH3-patch-1" ]
+    branches:
+      - main
 
 jobs:
   docker-security-scan:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout source code
+        uses: actions/checkout@v4
 
-    - name: Build Docker image
-      run: |
-        docker build -t myapp:${{ github.sha }} .
+      - name: Build Docker image
+        run: |
+          docker build -t myapp:${{ github.sha }} .
 
-    - name: Install Trivy
-      run: |
-        sudo apt-get install wget -y
-        wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.50.1_Linux-64bit.deb
-        sudo dpkg -i trivy_0.50.1_Linux-64bit.deb
+      # ✅ Correct & stable Trivy installation (NO 404 issues)
+      - name: Install Trivy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
+            | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" \
+            | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
 
-    - name: Scan Docker image
-      run: |
-        trivy image \
-          --format html \
-          --output trivy-report.html \
-          myapp:${{ github.sha }}
+      - name: Verify Trivy installation
+        run: trivy --version
 
-    - name: Send vulnerability report via email
-      uses: dawidd6/action-send-mail@v3
-      with:
-        server_address: ${{ secrets.SMTP_HOST }}
-        server_port: ${{ secrets.SMTP_PORT }}
-        username: ${{ secrets.SMTP_USER }}
-        password: ${{ secrets.SMTP_PASS }}
-        subject: "Docker Vulnerability Report - ${{ github.repository }}"
-        body: |
-          Hi Team,
+      # ✅ Scan Docker image and generate HTML report
+      - name: Scan Docker image
+        run: |
+          trivy image \
+            --format html \
+            --output trivy-vulnerability-report.html \
+            myapp:${{ github.sha }}
 
-          Please find the attached Docker vulnerability scan report.
+      # ✅ Send vulnerability report via email
+      - name: Email vulnerability report
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          subject: "Docker Vulnerability Report - ${{ github.repository }}"
+          to: ${{ secrets.MAIL_TO }}
+          from: CI Scanner <${{ secrets.SMTP_USER }}>
+          body: |
+            Hi Team,
 
-          Commit: ${{ github.sha }}
-          Repository: ${{ github.repository }}
+            Please find the attached Docker vulnerability scan report.
 
-          Regards,
-          CI Pipeline
-        to: ${{ secrets.MAIL_TO }}
-        from: CI Scanner <${{ secrets.SMTP_USER }}>
-        attachments: trivy-report.html
+            Repository : ${{ github.repository }}
+            Commit     : ${{ github.sha }}
+            Branch     : main
+
+            Regards,
+            GitHub Actions CI
+          attachments: trivy-vulnerability-report.html
