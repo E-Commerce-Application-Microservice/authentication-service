@@ -8,11 +8,19 @@ on:
 
 jobs:
   snyk-scan:
-    runs-on: self-hosted   # ✅ uses your runner
+    runs-on: ubuntu-latest   # ✅ GitHub-hosted shared runner
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Snyk CLI
+        run: npm install -g snyk
 
       - name: Authenticate to Snyk
         run: snyk auth ${{ secrets.SNYK_TOKEN }}
