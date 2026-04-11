@@ -18,25 +18,33 @@ jobs:
         run: |
           docker build -t myapp:${{ github.sha }} .
 
-      # ✅ Install Trivy (Ubuntu 24.04 safe)
+      # ✅ Install Trivy (Ubuntu 24.04 compatible)
       - name: Install Trivy
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
             | sudo sh -s -- -b /usr/local/bin
 
       - name: Verify Trivy
-        run: trivy --version
+        run: |
+          trivy --version
 
-      # ✅ Correct HTML generation using template
+      # ✅ Download Trivy HTML template (REQUIRED)
+      - name: Download Trivy HTML template
+        run: |
+          mkdir -p trivy-templates
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/html.tpl \
+            -o trivy-templates/html.tpl
+
+      # ✅ Scan Docker image and generate HTML report
       - name: Scan Docker image
         run: |
           trivy image \
             --format template \
-            --template "@contrib/html.tpl" \
+            --template "trivy-templates/html.tpl" \
             --output trivy-vulnerability-report.html \
             myapp:${{ github.sha }}
 
-      # ✅ Email the report
+      # ✅ Send vulnerability report via email
       - name: Email vulnerability report
         uses: dawidd6/action-send-mail@v3
         with:
