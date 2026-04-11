@@ -3,10 +3,11 @@ name: Build Docker Image, Scan & Email Vulnerability Report
 on:
   push:
     branches:
-      - ["main", "M-VIGNESH3-patch-1"]
+      - main
+      - M-VIGNESH3-patch-1
 
 jobs:
-  docker-security-scan: 
+  docker-security-scan:
     runs-on: ubuntu-latest
 
     steps:
@@ -30,7 +31,8 @@ jobs:
           sudo apt-get install -y trivy
 
       - name: Verify Trivy installation
-        run: trivy --version
+        run: |
+          trivy --version
 
       # ✅ Scan Docker image and generate HTML report
       - name: Scan Docker image
@@ -58,7 +60,7 @@ jobs:
 
             Repository : ${{ github.repository }}
             Commit     : ${{ github.sha }}
-            Branch     : main
+            Branch     : ${{ github.ref_name }}
 
             Regards,
             GitHub Actions CI
