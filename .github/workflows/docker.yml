@@ -3,7 +3,7 @@ name: Build Docker Image, Scan & Email Vulnerability Report
 on:
   push:
     branches:
-      - main
+      - ["main", "M-VIGNESH3-patch-1"]
 
 jobs:
   docker-security-scan:
