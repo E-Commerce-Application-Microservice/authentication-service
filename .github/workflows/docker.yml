@@ -18,17 +18,11 @@ jobs:
         run: |
           docker build -t myapp:${{ github.sha }} .
 
-      # ✅ Correct & stable Trivy installation (NO 404 issues)
+      # ✅ SAFE & WORKING Trivy installation (Ubuntu 24.04 compatible)
       - name: Install Trivy
         run: |
-          sudo apt-get update
-          sudo apt-get install -y wget gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
-            | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
-          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" \
-            | sudo tee /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install -y trivy
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin
 
       - name: Verify Trivy installation
         run: |
