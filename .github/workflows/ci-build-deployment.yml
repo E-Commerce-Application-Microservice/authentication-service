@@ -1,6 +1,8 @@
 name: CI Build & Deployment
 
 on:
+  push:
+    branches: [ "ci-pipeline" ]
   workflow_dispatch:
     inputs:
       image_tag:
