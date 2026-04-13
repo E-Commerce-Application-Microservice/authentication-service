@@ -1,0 +1,92 @@
+name: CI Validation Pipeline
+
+on:
+  push:
+    branches:
+      - ci-pipeline
+      - main
+
+jobs:
+  sonarqube:
+    name: SonarQube SAST
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: -Dsonar.projectKey=authentication-service
+
+      - name: SonarQube Quality Gate Status
+        uses: sonarsource/sonarqube-quality-gate-action@master
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Send email on failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: Validation Pipeline Failed (SonarQube)
+          to: ${{ secrets.EMAIL_RECIPIENTS }}
+          from: GitHub Actions
+          body: The SonarQube code quality scan failed or quality gate did not pass for Authentication Service.
+
+  snyk:
+    name: Snyk Vulnerability Scan
+    needs: sonarqube
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      
+      - name: Run Snyk SCA to check for vulnerabilities
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+          command: test
+          
+      - name: Send email on failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: Validation Pipeline Failed (Snyk)
+          to: ${{ secrets.EMAIL_RECIPIENTS }}
+          from: GitHub Actions
+          body: The Snyk dependency scan failed due to high/critical vulnerabilities for Authentication Service.
+
+      - name: Send Success Email
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: Validation Pipeline Succeeded!
+          to: ${{ secrets.EMAIL_RECIPIENTS }}
+          from: GitHub Actions
+          body: The Validation Pipeline for Authentication Service completed. You may now manually trigger the Build & Deployment pipeline.
