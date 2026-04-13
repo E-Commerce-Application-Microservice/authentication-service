@@ -1,0 +1,221 @@
+name: CI Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Docker Custom Image Tag (must be in the exact format vx.x.x, e.g., v1.0.0)'
+        required: true
+        type: string
+
+env:
+  DOCKER_IMAGE: ${{ secrets.DOCKER_USERNAME }}/authentication-service
+
+jobs:
+  validate_tag:
+    name: Validate Tag Parameter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check tag format
+        run: |
+          if [[ ! "${{ github.event.inputs.image_tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Tag must be in the format vx.x.x where x is a number (e.g., v1.0.2)."
+            exit 1
+          fi
+          echo "Tag ${{ github.event.inputs.image_tag }} is valid."
+
+  sonarqube:
+    name: SonarQube SAST
+    needs: validate_tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      - name: SonarQube Quality Gate Status
+        uses: sonarsource/sonarqube-quality-gate-action@master
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Send email on failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: GitHub Actions Delivery Pipeline Failed (SonarQube)
+          to: ${{ secrets.EMAIL_RECIPIENTS }}
+          from: GitHub Actions
+          body: The SonarQube code quality scan failed or quality gate did not pass.
+
+  snyk:
+    name: Snyk Vulnerability Scan
+    needs: sonarqube
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      
+      - name: Run Snyk SCA to check for vulnerabilities
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+          command: test
+          
+      - name: Send email on failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: GitHub Actions Delivery Pipeline Failed (Snyk)
+          to: ${{ secrets.EMAIL_RECIPIENTS }}
+          from: GitHub Actions
+          body: The Snyk dependency scan failed due to high/critical vulnerabilities.
+
+  docker_build:
+    name: Docker Build
+    needs: snyk
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+          
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: Build Docker Image
+        run: |
+          docker build -t ${{ env.DOCKER_IMAGE }}:${{ github.event.inputs.image_tag }} .
+          
+      - name: Save Docker image
+        run: docker save ${{ env.DOCKER_IMAGE }}:${{ github.event.inputs.image_tag }} > image.tar
+        
+      - name: Upload image artifact for scanning
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: image.tar
+
+      - name: Send email on failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: GitHub Actions Delivery Pipeline Failed (Docker Build)
+          to: ${{ secrets.EMAIL_RECIPIENTS }}
+          from: GitHub Actions
+          body: The step to build the Docker image failed.
+          
+  image_scan:
+    name: Image Scan (Trivy)
+    needs: docker_build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          
+      - name: Load Docker image
+        run: docker load < image.tar
+        
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.DOCKER_IMAGE }}:${{ github.event.inputs.image_tag }}'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+          
+      - name: Send email on failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: GitHub Actions Delivery Pipeline Failed (Trivy Image Scan)
+          to: ${{ secrets.EMAIL_RECIPIENTS }}
+          from: GitHub Actions
+          body: High or critical vulnerabilities were found in the Docker image by Trivy.
+
+  docker_push:
+    name: Docker Push
+    needs: image_scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          
+      - name: Load Docker image
+        run: docker load < image.tar
+        
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          
+      - name: Push Docker Image
+        run: |
+          docker push ${{ env.DOCKER_IMAGE }}:${{ github.event.inputs.image_tag }}
+          
+      - name: Send Final Success Summary Email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: GitHub Actions CI Pipeline Succeeded
+          to: ${{ secrets.EMAIL_RECIPIENTS }}
+          from: GitHub Actions
+          body: |
+            The authentication-service CI pipeline completed successfully!
+            
+            Docker Image: ${{ env.DOCKER_IMAGE }}
+            Tag Pushed: ${{ github.event.inputs.image_tag }}
+            
+            SonarQube, Snyk, and Trivy scans passed all quality gates.
+
+      - name: Send email on failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: GitHub Actions Delivery Pipeline Failed (Docker Push)
+          to: ${{ secrets.EMAIL_RECIPIENTS }}
+          from: GitHub Actions
+          body: Pushing the docker image to registry failed.
